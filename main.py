@@ -142,6 +142,18 @@ def start_web_server():
             devices = cfg.get("devices", {})
             cl.send("HTTP/1.0 200 OK\r\nContent-Type: application/json\r\n\r\n")
             cl.send(json.dumps(devices))
+            
+        elif "GET /ota" in req:
+            try:
+                import ota_updater
+                cl.send("HTTP/1.0 200 OK\r\nContent-Type: text/plain\r\n\r\nAtualizando... Reiniciando em instantes.")
+                cl.close()
+                time.sleep(1)
+                ota_updater.update_all()
+                return
+            except Exception as e:
+                print("[WEB] Erro ao iniciar OTA:", e)
+                cl.send("HTTP/1.0 500 Internal Server Error\r\n\r\nErro ao iniciar atualização OTA.")
 
         elif "POST /save-device" in req:
             try:
