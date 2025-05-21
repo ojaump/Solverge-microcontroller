@@ -11,23 +11,21 @@ from umqtt.simple import MQTTClient
 CONFIG_FILE = "config.json"
 
 def load_config():
+    config = {}
     try:
-        with open(CONFIG_FILE) as f:
-            return json.load(f)
+        with open("config.json") as f:
+            user_config = json.load(f)
+            config.update(user_config)  # sobrepõe as chaves
     except:
-        return {}
+        print("[CONFIG] Aviso: config.json não encontrado. Usando apenas config.default.json.")
+
+    return config
 
 def save_config(config):
     with open(CONFIG_FILE, "w") as f:
         json.dump(config, f)
-MQTT_CONFIG = {
-    "host": "mqtt.ojaum.lat",
-    "port": 1883,
-    "user": "Solverge",
-    "password": "X!I#XQD^A7K5Y&GwKv6z",
-    "ssl": False
-}
-
+config = load_config()
+MQTT_CONFIG = config.get("mqtt", {})
 
 client = None
 
@@ -42,15 +40,14 @@ def connect_mqtt():
 
     try:
         client = MQTTClient(
-            client_id=device_id,
-            server=MQTT_CONFIG["host"],
-            port=MQTT_CONFIG["port"],
-            user=MQTT_CONFIG["user"],
-            password=MQTT_CONFIG["password"],
-            ssl=MQTT_CONFIG["ssl"],
-            ssl_params={"server_hostname": MQTT_CONFIG["host"]}
+        client_id=device_id,
+        server=MQTT_CONFIG.get("host"),
+        port=MQTT_CONFIG.get("port", 1883),
+        user=MQTT_CONFIG.get("user"),
+        password=MQTT_CONFIG.get("password"),
+        ssl=MQTT_CONFIG.get("ssl", False),
+        ssl_params={"server_hostname": MQTT_CONFIG.get("host")}
         )
-
         client.connect()
         client.set_callback(on_mqtt_command)
         device_id = get_device_id()
@@ -347,4 +344,3 @@ _thread.start_new_thread(start_web_server, ())
 
 # Executa o loop principal
 main_loop()
-
