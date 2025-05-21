@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Configurar Wi-Fi - Solverge</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="/styles.css" />
+  <script src="/scripts.js"></script>
+</head>
+<body>
+  <header>
+    <div class="menu-toggle" onclick="toggleMenu()">☰</div>
+    <h1>Solverge</h1>
+  </header>
+  <nav id="menu" class="hidden">
+    <a href="/">Home</a>
+    <a href="/wifi">Wi-Fi</a>
+    <a href="/dispositivos">Dispositivos</a>
+  </nav>
+
+  <main>
+    <h2>Configurar Wi-Fi</h2>
+    <button onclick="scanNetworks()">🔄 Atualizar Redes</button>
+
+    <div id="networksModal" class="modal hidden">
+      <div class="modal-content">
+        <h3>Redes Encontradas</h3>
+        <div id="networkList"></div>
+        <button onclick="closeModal()">Fechar</button>
+      </div>
+    </div>
+
+    <form method="POST" action="/save-wifi">
+      <label for="ssid">SSID</label>
+      <input type="text" id="ssid" name="ssid" required />
+
+      <label for="password">Senha</label>
+      <input type="password" id="password" name="password" required />
+
+      <button type="submit">Salvar</button>
+    </form>
+  </main>
+</body>
+</html>

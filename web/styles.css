@@ -1,0 +1,103 @@
+body {
+  font-family: sans-serif;
+  margin: 0;
+  padding: 0;
+  background: #121212;
+  color: #eee;
+}
+
+header {
+  background: #1f1f1f;
+  padding: 1em;
+  display: flex;
+  align-items: center;
+}
+
+h1 {
+  flex: 1;
+  margin: 0;
+  font-size: 1.2em;
+}
+
+.menu-toggle {
+  font-size: 1.5em;
+  cursor: pointer;
+}
+
+nav {
+  background: #272727;
+  display: flex;
+  flex-direction: column;
+}
+
+nav a {
+  padding: 1em;
+  border-bottom: 1px solid #333;
+  text-decoration: none;
+  color: #eee;
+}
+
+nav.hidden {
+  display: none;
+}
+
+main {
+  padding: 1em;
+}
+
+button {
+  padding: 0.5em 1em;
+  margin-top: 1em;
+  background: #03a9f4;
+  border: none;
+  color: white;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+input {
+  display: block;
+  width: 100%;
+  padding: 0.5em;
+  margin-top: 0.2em;
+  margin-bottom: 1em;
+  background: #1e1e1e;
+  border: 1px solid #333;
+  color: white;
+  border-radius: 4px;
+}
+
+.modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0,0,0,0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal.hidden {
+  display: none;
+}
+
+.modal-content {
+  background: #2c2c2c;
+  padding: 1em;
+  border-radius: 6px;
+  width: 90%;
+  max-width: 400px;
+}
+
+.network-item {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 0.5em;
+  padding: 0.5em;
+  border: 1px solid #444;
+  border-radius: 4px;
+  background: #1f1f1f;
+  cursor: pointer;
+}

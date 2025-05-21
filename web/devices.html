@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Dispositivos - Solverge</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="/styles.css" />
+  <script src="/scripts.js"></script>
+  <script>
+    async function loadDevices() {
+      const res = await fetch("/get-devices");
+      const devices = await res.json();
+      const list = document.getElementById("deviceList");
+      list.innerHTML = "";
+
+      Object.entries(devices).forEach(([id, dev]) => {
+        const item = document.createElement("div");
+        item.className = "device-item";
+        item.innerHTML = `
+          <strong>${id}</strong><br>
+          IP: ${dev.ip} — Porta: ${dev.port} — Tipo: ${dev.type}<br>
+        `;
+        list.appendChild(item);
+      });
+    }
+
+    async function saveDevice() {
+      const id = document.getElementById("id").value.trim();
+      const ip = document.getElementById("ip").value.trim();
+      const port = parseInt(document.getElementById("port").value.trim());
+      const type = document.getElementById("type").value;
+
+      if (!id || !ip || !port || !type) {
+        alert("Preencha todos os campos!");
+        return;
+      }
+
+      const res = await fetch("/save-device", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, ip, port, type }),
+      });
+
+      if (res.ok) {
+        alert("Dispositivo salvo!");
+        loadDevices();
+      } else {
+        alert("Erro ao salvar dispositivo.");
+      }
+    }
+
+    window.onload = loadDevices;
+  </script>
+</head>
+<body>
+  <header>
+    <div class="menu-toggle" onclick="toggleMenu()">☰</div>
+    <h1>Solverge</h1>
+  </header>
+  <nav id="menu" class="hidden">
+    <a href="/">Home</a>
+    <a href="/wifi">Wi-Fi</a>
+    <a href="/dispositivos">Dispositivos</a>
+  </nav>
+
+  <main>
+    <h2>Dispositivos</h2>
+
+    <div id="deviceList"></div>
+
+    <h3>Adicionar / Editar</h3>
+    <input id="id" placeholder="ID ex: G1" />
+    <input id="ip" placeholder="IP ex: 192.168.3.100" />
+    <input id="port" placeholder="Porta ex: 502" type="number" />
+    <select id="type">
+      <option value="gerador">Gerador</option>
+      <option value="qta">QTA</option>
+    </select>
+    <button onclick="saveDevice()">Salvar</button>
+  </main>
+</body>
+</html>

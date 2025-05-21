@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Status Wi-Fi - Solverge</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="/styles.css" />
+  <script src="/scripts.js"></script> <!-- ✅ AQUI -->
+  <script>
+    async function loadStatus() {
+      const res = await fetch('/status');
+      const data = await res.json();
+      document.getElementById('status').innerText = data.connected ? "✅ Conectado" : "❌ Desconectado";
+      document.getElementById('ssid').innerText = data.ssid || "-";
+      document.getElementById('ip').innerText = data.ip || "-";
+      document.getElementById('signal').innerText = getSignal(data.rssi);
+    }
+
+    function getSignal(rssi) {
+      if (rssi === null) return "-";
+      const level = Math.abs(rssi);
+      if (level < 60) return "📶 Excelente";
+      if (level < 75) return "📶 Normal";
+      return "📶 Fraco";
+    }
+
+    window.onload = loadStatus;
+  </script>
+</head>
+<body>
+  <header>
+    <div class="menu-toggle" onclick="toggleMenu()">☰</div>
+    <h1>Solverge</h1>
+  </header>
+  <nav id="menu" class="hidden">
+    <a href="/">Home</a>
+    <a href="/wifi">Wi-Fi</a>
+    <a href="/dispositivos">Dispositivos</a>
+  </nav>
+
+  <main>
+    <h2>Status da Conexão</h2>
+    <p><strong>Status:</strong> <span id="status">...</span></p>
+    <p><strong>Rede:</strong> <span id="ssid">...</span></p>
+    <p><strong>IP:</strong> <span id="ip">...</span></p>
+    <p><strong>Sinal:</strong> <span id="signal">...</span></p>
+  </main>
+</body>
+</html>
