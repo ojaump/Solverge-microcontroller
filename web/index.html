@@ -7,6 +7,13 @@
   <link rel="stylesheet" href="/styles.css" />
   <script src="/scripts.js"></script> <!-- ✅ AQUI -->
   <script>
+      async function triggerOTA() {
+        if (confirm("Tem certeza que deseja atualizar o sistema?")) {
+          const res = await fetch("/ota");
+          const msg = await res.text();
+          alert(msg);
+        }
+      }
     async function loadStatus() {
       const res = await fetch('/status');
       const data = await res.json();
@@ -44,6 +51,8 @@
     <p><strong>Rede:</strong> <span id="ssid">...</span></p>
     <p><strong>IP:</strong> <span id="ip">...</span></p>
     <p><strong>Sinal:</strong> <span id="signal">...</span></p>
+    <h3>Manutenção</h3>
+    <button onclick="triggerOTA()">🔄 Atualizar Sistema (OTA)</button>
   </main>
 </body>
 </html>
