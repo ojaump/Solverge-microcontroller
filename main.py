@@ -6,7 +6,7 @@ import socket
 import os
 import time
 from machine import reset
-from websocket import WebSocketClient
+from umqtt.simple import MQTTClient
 
 CONFIG_FILE = "config.json"
 
@@ -25,65 +25,51 @@ def save_config(config):
     with open(CONFIG_FILE, "w") as f:
         json.dump(config, f)
 config = load_config()
+MQTT_CONFIG = config.get("mqtt", {})
 
-ws_client = None
+client = None
 
 def get_device_id():
     mac = ubinascii.hexlify(network.WLAN(network.STA_IF).config("mac")).decode()
-    return mac
+    return "solverge-" + mac
 
-def connect_websocket():
-    global ws_client
-    device_mac = get_device_id()
-    ws_url = f"ws://solverge.ojaum.lat/ws?mac={device_mac}"
-    print("[WS] Conectando como:", device_mac)
+def connect_mqtt():
+    global client
+    device_id = get_device_id()
+    print("[MQTT] Conectando como:", device_id)
 
     try:
-        ws_client = WebSocketClient(ws_url)
-        ws_client.on_message = on_ws_message
-        ws_client.on_connect = on_ws_connect
-        ws_client.on_disconnect = on_ws_disconnect
-        ws_client.connect()
-        print("[WS] Conectado com sucesso")
+        client = MQTTClient(
+        client_id=device_id,
+        server=MQTT_CONFIG.get("host"),
+        port=MQTT_CONFIG.get("port", 1883),
+        user=MQTT_CONFIG.get("user"),
+        password=MQTT_CONFIG.get("password"),
+        ssl=MQTT_CONFIG.get("ssl", False),
+        ssl_params={"server_hostname": MQTT_CONFIG.get("host")}
+        )
+        client.connect()
+        client.set_callback(on_mqtt_command)
+        device_id = get_device_id()
+        client.subscribe(f"solverge/{device_id}/command")
+        print("[MQTT] Conectado com sucesso ao broker.")
         return True
     except Exception as e:
-        print("[WS] Falha ao conectar:", e)
+        print("[MQTT] Falha ao conectar:", e)
         return False
 
-def ws_publish(data):
+def mqtt_publish(topic, payload):
     try:
-        if ws_client and ws_client.connected:
-            ws_client.send(json.dumps(data))
+        if client:
+            client.publish(topic, payload)
+            print(f"[MQTT] Publicado em {topic}: {payload}")
     except Exception as e:
-        print("[WS] Erro ao publicar:", e)
-
-def on_ws_message(msg):
-    try:
-        data = json.loads(msg)
-        if "command" in data:
-            handle_command(data)
-    except Exception as e:
-        print("[WS] Erro ao processar mensagem:", e)
-
-def on_ws_connect():
-    print("[WS] Conectado")
-    ws_publish({"status": "online"})
-
-def on_ws_disconnect():
-    print("[WS] Desconectado")
-
-def websocket_loop():
-    while True:
-        try:
-            if ws_client and ws_client.connected:
-                msg = ws_client.receive()
-                if msg:
-                    on_ws_message(msg)
-            else:
-                connect_websocket()
-        except Exception as e:
-            print("[WS] Erro no loop:", e)
-        time.sleep(0.1)
+        print("[MQTT] Erro ao publicar:", e)
+        
+def get_mac():
+    wlan = network.WLAN(network.STA_IF)
+    mac = ubinascii.hexlify(wlan.config('mac'), ':').decode()
+    return mac, mac.replace(":", "")
 
 def start_ap():
     ap = network.WLAN(network.AP_IF)
@@ -222,25 +208,31 @@ def handle_wifi_save(client, req):
         print("[WEB] Erro ao salvar Wi-Fi:", e)
         
 def main_loop():
-    print("[MAIN] Sistema iniciado com sucesso")
+    print("[MAIN] Sistema iniciado com sucesso. Executando loop principal...")
     sta = network.WLAN(network.STA_IF)
     ap = network.WLAN(network.AP_IF)
 
     print("[DEBUG] IP Station:", sta.ifconfig()[0])
     print("[DEBUG] IP AP:", ap.ifconfig()[0])
-
     while True:
+        if not client:
+            print("[MAIN] Tentando reconectar ao MQTT...")
+            if connect_mqtt():
+                mqtt_publish("solverge/status", "online")
+
         cfg = load_config()
         devices = cfg.get("devices", {})
 
         for device_id, info in devices.items():
-            if info.get("type") == "gerador":
-                data = read_generator_data(info.get("ip"), info.get("port", 502))
+            ip = info.get("ip")
+            port = info.get("port", 502)
+            tipo = info.get("type")
+
+            if tipo == "gerador":
+                data = read_generator_data(ip, port)
                 if data:
-                    ws_publish({
-                        "device": device_id,
-                        "data": data
-                    })
+                    mqtt_publish(f"solverge/{device_id}", json.dumps(data))
+
         time.sleep(5)
 def read_generator_data(ip, port):
     try:
@@ -355,10 +347,12 @@ config = load_config()
 start_ap()
 
 if connect_wifi(config):
-    print("[BOOT] Wi-Fi conectado. Iniciando sistema...")
-    _thread.start_new_thread(start_web_server,())
-    _thread.start_new_thread(websocket_loop,())
-    main_loop()
+    print("[BOOT] Wi-Fi conectado. Iniciando sistema principal...")
 else:
     print("[BOOT] Sem Wi-Fi. Modo AP ativo.")
-    start_web_server()
+
+# Inicia o web server em paralelo
+_thread.start_new_thread(start_web_server, ())
+
+# Executa o loop principal
+main_loop()
