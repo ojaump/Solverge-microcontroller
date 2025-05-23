@@ -7,6 +7,7 @@ REPO_URL = "https://raw.githubusercontent.com/ojaump/Solverge-microcontroller/ma
 FILES = [
     "boot.py",
     "main.py",
+    "websocket.py",
     "lib/modbus_tcp_client.py",
     "lib/umqtt.simple.py",
     "web/index.html",
