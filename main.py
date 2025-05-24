@@ -191,7 +191,7 @@ async def handle_websocket():
     import json
     mac = get_mac()[1]
     ws = AsyncWebsocketClient()
-    await ws.handshake(f"ws://192.168.3.44:5000/ws?mac={mac}")
+    await ws.handshake(f"ws://solverge.ojaum.lat/ws?mac={mac}")
     print("[WS] Conectado ao servidor WebSocket")
 
     async def listener():
