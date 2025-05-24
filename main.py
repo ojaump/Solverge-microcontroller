@@ -1,189 +1,39 @@
+# main.py
 import network
-import _thread
 import ubinascii
+import uasyncio as asyncio
 import json
-import socket
-import os
 import time
+import socket
+import _thread
 from machine import reset
-from umqtt.simple import MQTTClient
+from lib.modbus_tcp_client import ModbusTCPClient
+from websocket.ws import AsyncWebsocketClient
 
 CONFIG_FILE = "config.json"
 
-def load_config():
-    config = {}
-    try:
-        with open("config.json") as f:
-            user_config = json.load(f)
-            config.update(user_config)  # sobrepõe as chaves
-    except:
-        print("[CONFIG] Aviso: config.json não encontrado. Usando apenas config.default.json.")
-
-    return config
-
-def save_config(config):
-    with open(CONFIG_FILE, "w") as f:
-        json.dump(config, f)
-config = load_config()
-MQTT_CONFIG = config.get("mqtt", {})
-
-client = None
-
-def get_device_id():
-    mac = ubinascii.hexlify(network.WLAN(network.STA_IF).config("mac")).decode()
-    return "solverge-" + mac
-
-def connect_mqtt():
-    global client
-    device_id = get_device_id()
-    print("[MQTT] Conectando como:", device_id)
-
-    try:
-        client = MQTTClient(
-        client_id=device_id,
-        server=MQTT_CONFIG.get("host"),
-        port=MQTT_CONFIG.get("port", 1883),
-        user=MQTT_CONFIG.get("user"),
-        password=MQTT_CONFIG.get("password"),
-        ssl=MQTT_CONFIG.get("ssl", False),
-        ssl_params={"server_hostname": MQTT_CONFIG.get("host")}
-        )
-        client.connect()
-        client.set_callback(on_mqtt_command)
-        device_id = get_device_id()
-        client.subscribe(f"solverge/{device_id}/command")
-        print("[MQTT] Conectado com sucesso ao broker.")
-        return True
-    except Exception as e:
-        print("[MQTT] Falha ao conectar:", e)
-        return False
-
-def mqtt_publish(topic, payload):
-    try:
-        if client:
-            client.publish(topic, payload)
-            print(f"[MQTT] Publicado em {topic}: {payload}")
-    except Exception as e:
-        print("[MQTT] Erro ao publicar:", e)
-        
 def get_mac():
     wlan = network.WLAN(network.STA_IF)
     mac = ubinascii.hexlify(wlan.config('mac'), ':').decode()
     return mac, mac.replace(":", "")
 
-def start_ap():
-    ap = network.WLAN(network.AP_IF)
-    ap.active(True)
-    mac, password = get_mac()
-    ap.config(essid="Solverge", password=password)
-    print("[HOTSPOT] AP iniciado: SSID=Solverge, Senha=", password)
-    return ap
+def load_config():
+    cfg = {}
+    try:
+        with open(CONFIG_FILE) as f:
+            cfg.update(json.load(f))
+    except:
+        print("[CONFIG] Aviso: config.json não encontrado.")
+    return cfg
 
-def connect_wifi(config):
-    sta = network.WLAN(network.STA_IF)
-    sta.active(True)
-    ssid = config.get("wifi", {}).get("ssid")
-    password = config.get("wifi", {}).get("password")
-    if not ssid or not password:
-        print("[WIFI] Nenhuma configuração Wi-Fi encontrada.")
-        return False
-    sta.connect(ssid, password)
-    for _ in range(20):
-        if sta.isconnected():
-            print(f"[WIFI] Conectado a {ssid} com IP {sta.ifconfig()[0]}")
-            return True
-        time.sleep(1)
-    print("[WIFI] Falha ao conectar.")
-    return False
-def start_web_server():
-    addr = socket.getaddrinfo("0.0.0.0", 80)[0][-1]
-    s = socket.socket()
-    s.bind(addr)
-    s.listen(1)
-    print("[WEB] Servidor ouvindo em porta 80")
-
-    while True:
-        cl, addr = s.accept()
-        print("[WEB] Cliente conectado de", addr)
-        req = cl.recv(1024).decode()
-
-        if "GET /wifi" in req:
-            serve_file(cl, "web/wifi.html")
-        elif "GET / " in req:
-            serve_file(cl, "web/index.html")
-        elif "GET /scripts.js" in req:
-            serve_file(cl, "web/scripts.js", content_type="application/javascript")
-        elif "GET /scan" in req:
-            try:
-                sta = network.WLAN(network.STA_IF)
-                sta.active(True)
-                nets = sta.scan()
-                result = [{"ssid": n[0].decode(), "rssi": n[3]} for n in nets]
-                cl.send("HTTP/1.0 200 OK\r\nContent-Type: application/json\r\n\r\n")
-                cl.send(json.dumps(result))
-            except Exception as e:
-                print("[WIFI] Erro ao escanear redes:", e)
-                cl.send("HTTP/1.0 500 Internal Server Error\r\n\r\n")
-        elif "GET /status" in req:
-            sta = network.WLAN(network.STA_IF)
-            data = {
-                "connected": sta.isconnected(),
-                "ssid": sta.config("essid") if sta.isconnected() else None,
-                "ip": sta.ifconfig()[0] if sta.isconnected() else None,
-                "rssi": sta.status("rssi") if sta.isconnected() else None,
-            }
-            cl.send("HTTP/1.0 200 OK\r\nContent-Type: application/json\r\n\r\n")
-            cl.send(json.dumps(data))
-        elif "GET /dispositivos" in req:
-            serve_file(cl, "web/devices.html")
-
-        elif "GET /get-devices" in req:
-            cfg = load_config()
-            devices = cfg.get("devices", {})
-            cl.send("HTTP/1.0 200 OK\r\nContent-Type: application/json\r\n\r\n")
-            cl.send(json.dumps(devices))
-            
-        elif "GET /ota" in req:
-            try:
-                import ota_updater
-                cl.send("HTTP/1.0 200 OK\r\nContent-Type: text/plain\r\n\r\nAtualizando... Reiniciando em instantes.")
-                cl.close()
-                time.sleep(1)
-                ota_updater.update_all()
-                return
-            except Exception as e:
-                print("[WEB] Erro ao iniciar OTA:", e)
-                cl.send("HTTP/1.0 500 Internal Server Error\r\n\r\nErro ao iniciar atualização OTA.")
-
-        elif "POST /save-device" in req:
-            try:
-                body = req.split("\r\n\r\n", 1)[1]
-                data = json.loads(body)
-                cfg = load_config()
-                if "devices" not in cfg:
-                    cfg["devices"] = {}
-                cfg["devices"][data["id"]] = {
-                    "ip": data["ip"],
-                    "port": int(data["port"]),
-                    "type": data["type"]
-                }
-                save_config(cfg)
-                cl.send("HTTP/1.0 200 OK\r\n\r\nSalvo com sucesso.")
-            except Exception as e:
-                print("[WEB] Erro ao salvar dispositivo:", e)
-                cl.send("HTTP/1.0 500 Internal Server Error\r\n\r\nErro ao salvar dispositivo.")
-        elif "GET /styles.css" in req:
-            serve_file(cl, "web/styles.css", content_type="text/css")
-        elif "GET /scripts.js" in req:
-            serve_file(cl, "web/scripts.js", content_type="application/javascript")
-        elif "POST /save-wifi" in req:
-            handle_wifi_save(cl, req)
-        cl.close()
+def save_config(cfg):
+    with open(CONFIG_FILE, "w") as f:
+        json.dump(cfg, f)
 
 def serve_file(client, path, content_type="text/html"):
     try:
         with open(path, "r") as f:
-            client.send("HTTP/1.0 200 OK\r\nContent-type: {}\r\n\r\n".format(content_type))
+            client.send("HTTP/1.0 200 OK\r\nContent-Type: {}\r\n\r\n".format(content_type))
             client.send(f.read())
     except:
         client.send("HTTP/1.0 404 Not Found\r\n\r\nFile not found.")
@@ -204,155 +54,179 @@ def handle_wifi_save(client, req):
         else:
             client.send("HTTP/1.0 400 Bad Request\r\n\r\nParâmetros inválidos.")
     except Exception as e:
+        import sys
+        sys.print_exception(e)
         client.send("HTTP/1.0 500 Internal Server Error\r\n\r\nErro interno.")
         print("[WEB] Erro ao salvar Wi-Fi:", e)
-        
-def main_loop():
-    print("[MAIN] Sistema iniciado com sucesso. Executando loop principal...")
-    sta = network.WLAN(network.STA_IF)
-    ap = network.WLAN(network.AP_IF)
 
-    print("[DEBUG] IP Station:", sta.ifconfig()[0])
-    print("[DEBUG] IP AP:", ap.ifconfig()[0])
+def start_web_server():
+    addr = socket.getaddrinfo("0.0.0.0", 80)[0][-1]
+    s = socket.socket()
+    s.bind(addr)
+    s.listen(1)
+    print("[WEB] Servidor ouvindo em porta 80")
     while True:
-        if not client:
-            print("[MAIN] Tentando reconectar ao MQTT...")
-            if connect_mqtt():
-                mqtt_publish("solverge/status", "online")
+        cl, addr = s.accept()
+        req = cl.recv(1024).decode()
+        if "GET /wifi"   in req: serve_file(cl, "web/wifi.html")
+        elif "GET / "    in req: serve_file(cl, "web/index.html")
+        elif "GET /scripts.js" in req:
+            serve_file(cl, "web/scripts.js", content_type="application/javascript")
+        elif "GET /scan" in req:
+            try:
+                sta = network.WLAN(network.STA_IF)
+                sta.active(True)
+                nets = sta.scan()
+                out = [{"ssid":n[0].decode(),"rssi":n[3]} for n in nets]
+                cl.send("HTTP/1.0 200 OK\r\nContent-Type: application/json\r\n\r\n")
+                cl.send(json.dumps(out))
+            except Exception as e:
+                print("[WIFI] Erro scan:", e)
+                cl.send("HTTP/1.0 500 Internal Server Error\r\n\r\n")
+        elif "GET /status" in req:
+            sta = network.WLAN(network.STA_IF)
+            data = {
+                "connected": sta.isconnected(),
+                "ssid":      sta.config("essid") if sta.isconnected() else None,
+                "ip":        sta.ifconfig()[0] if sta.isconnected() else None,
+                "rssi":      sta.status("rssi") if sta.isconnected() else None,
+            }
+            cl.send("HTTP/1.0 200 OK\r\nContent-Type: application/json\r\n\r\n")
+            cl.send(json.dumps(data))
+        elif "POST /save-wifi" in req:
+            handle_wifi_save(cl, req)
+        cl.close()
 
-        cfg = load_config()
-        devices = cfg.get("devices", {})
-
-        for device_id, info in devices.items():
-            ip = info.get("ip")
-            port = info.get("port", 502)
-            tipo = info.get("type")
-
-            if tipo == "gerador":
-                data = read_generator_data(ip, port)
-                if data:
-                    mqtt_publish(f"solverge/{device_id}", json.dumps(data))
-
-        time.sleep(5)
+def select_mode(client, command):
+    mapping = {
+        "stop":   35700,
+        "auto":   35701,
+        "manual": 35702,
+        "start":  35705,
+        "run":    35708
+    }
+    if command not in mapping:
+        print(f"[CMD] inválido: {command}")
+        return
+    addr  = 16*256 + 8
+    value = mapping[command]
+    try:
+        client.write_registers(addr,      [value, 0xFFFF - value])
+        print(f"[CMD] '{command}' gravado em regs {addr} e {addr+1}")
+    except Exception as e:
+        print("[CMD] erro ao escrever:", e)
+def get_generator_mode(client):
+    status_map = {0: "Stop", 1: "Auto", 2: "Manual"}
+    generator_status = client.read_single_register(3*256+4)
+    return status_map.get(generator_status, "Desconhecido")
 def read_generator_data(ip, port):
     try:
         c = ModbusTCPClient(ip, port)
         c.connect()
-
         data = {
             "modo": get_generator_mode(c),
-            "velocidade_motor": c.read_single_register(4 * 256 + 6),
-            "pressao_oleo": c.read_single_register(4 * 256 + 0) / 10,
-            "temperatura_liquido_arrefecimento": c.read_single_register(4 * 256 + 1),
-            "tensao_bateria": c.read_single_register(4 * 256 + 5) / 10,
-            "frequencia_gerador": c.read_single_register(4 * 256 + 7) / 10,
-            "tensao_gerador_L1_N": round(c.read_double_register(4 * 256 + 10) * 0.1),
-            "corrente_gerador": get_generator_current(c),
-            "producao_atual": get_generator_power(c),
-            "producao_acumulada": c.read_double_register(7 * 256 + 8),
-            "horas_trabalhadas": c.read_double_register(7 * 256 + 6) / 3600,
-            "pressao_turbo": c.read_single_register(5 * 256 + 4) / 10,
-            "state": get_bus_state(c)
+            "velocidade_motor": c.read_single_register(4*256+6),
+            "pressao_oleo":    c.read_single_register(4*256+0)/10,
+            "temperatura_liquido_arrefecimento": c.read_single_register(4*256+1),
+            "tensao_bateria":  c.read_single_register(4*256+5)/10,
+            "frequencia_gerador": c.read_single_register(4*256+7)/10,
+            "tensao_gerador_L1_N": round(c.read_double_register(4*256+10)*0.1),
+            "corrente_gerador":    c.read_double_register(4*256+20+2)*0.1,
+            "producao_atual":      c.read_double_register(4*256+28)/1000,
+            "producao_acumulada":  c.read_double_register(7*256+8),
+            "horas_trabalhadas":   c.read_double_register(7*256+6)/3600,
+            "pressao_turbo":       c.read_single_register(5*256+4)/10,
+            "state":               "Ready!" if c.read_double_register(190*256+14)==1 else "Wait!"
         }
-
         c.close()
         return data
-
     except Exception as e:
-        print("[MODBUS] Erro ao ler dados do dispositivo:", e)
+        print("[MODBUS] erro leitura:", e)
         return None
 
-def get_generator_mode(client):
-    status_map = {0: "Stop", 1: "Auto", 2: "Manual"}
-    generator_status = client.read_single_register(3 * 256 + 4)
-    return status_map.get(generator_status, "Desconhecido")
+async def handle_websocket():
+    import json
+    mac = get_mac()[1]
+    ws = AsyncWebsocketClient()
+    await ws.handshake(f"ws://solverge.ojaum.lat/ws?mac={mac}")
+    print("[WS] Conectado ao servidor WebSocket")
 
-def get_generator_current(client):
-    currents = [
-        client.read_double_register(4 * 256 + 20),
-        client.read_double_register(4 * 256 + 22),
-        client.read_double_register(4 * 256 + 24)
-    ]
-    return sum(currents) * 0.1
+    async def listener():
+        while True:
+            msg = await ws.recv()
+            if not msg:
+                await asyncio.sleep(1)
+                continue
+            try:
+                cmd = json.loads(msg)
+                dev = cmd.get("device") or cmd.get("id")
+                mode= cmd.get("mode")
+                if dev and mode:
+                    cfg  = load_config()
+                    info = cfg.get("devices",{}).get(dev)
+                    if info:
+                        cli = ModbusTCPClient(info["ip"], info.get("port",502))
+                        cli.connect()
+                        select_mode(cli, mode)
+                        cli.close()
+                    else:
+                        print(f"[WS] dispositivo não encontrado: {dev}")
+                else:
+                    print("[WS] JSON incompleto:", cmd)
+            except Exception as e:
+                print("[WS] erro listener:", e)
+            await asyncio.sleep(1)
 
-def get_generator_power(client):
-    powers = [
-        client.read_double_register(4 * 256 + 28),
-        client.read_double_register(4 * 256 + 30),
-        client.read_double_register(4 * 256 + 32)
-    ]
-    return sum(powers) / 1000
+    async def sender():
+        mac = get_mac()[1]
+        while True:
+            cfg = load_config()
+            for dev, info in cfg.get("devices",{}).items():
+                if info.get("type")=="gerador":
+                    data = read_generator_data(info["ip"], info.get("port",502))
+                    if data:
+                        await ws.send(json.dumps({mac:{dev:data}}))
+                        print("[WS] dados enviados.")
+            await asyncio.sleep(1)
 
-def get_bus_state(client):
-    bus_state = client.read_double_register(190 * 256 + 14)
-    return "Ready!" if bus_state == 1 else "Wait!"
+    await asyncio.gather(listener(), sender())
 
-def write_registers(self, address, values):
-    # MBAP: Transaction ID, Protocol ID, Length, Unit ID
-    self.transaction_id = (self.transaction_id + 1) % 65536
-    length = 7 + 1 + 2 + len(values) * 2
-    mbap = struct.pack('>HHHB', self.transaction_id, 0, length - 6, self.unit_id)
+async def main():
+    # 1) Hotspot para configuração
+    _, mac = get_mac()
+    ap = network.WLAN(network.AP_IF)
+    ap.config(essid="Solverge",
+              password="")
+    ap.active(True)
+    print("=== Hotspot Configuration ===")
+    print("AP SSID:   Solverge")
+    print("=============================")
 
-    # PDU: Function code 0x10 (write multiple registers)
-    count = len(values)
-    header = struct.pack('>BHHB', 0x10, address, count, count * 2)
-    data = b''.join(struct.pack('>H', v) for v in values)
+    # 2) Tenta conectar via STA se já tiver configurações
+    cfg = load_config()
+    sta = network.WLAN(network.STA_IF)
+    sta.active(True)
+    if "wifi" in cfg:
+        ss, pw = cfg["wifi"]["ssid"], cfg["wifi"]["password"]
+        print(f"[BOOT] Tentando STA: {ss}")
+        sta.connect(ss, pw)
+        for _ in range(20):
+            if sta.isconnected():
+                print("[WIFI] Conectado com IP:", sta.ifconfig()[0])
+                break
+            await asyncio.sleep(1)
+        else:
+            print("[WIFI] Falha ao conectar STA")
 
-    request = mbap + header + data
-    self.sock.send(request)
-    resp = self.sock.recv(12)  # confirm response (address + count)
+    # 3) Sobe web server sempre (para /wifi)
+    _thread.start_new_thread(start_web_server, ())
 
-    return True
-def on_mqtt_command(topic, msg):
-    try:
-        print(f"[MQTT] Comando recebido em {topic}: {msg}")
-        data = json.loads(msg)
-
-        device_id = data.get("id")
-        command = data.get("command")
-
-        cfg = load_config()
-        devices = cfg.get("devices", {})
-        if device_id not in devices:
-            print(f"[CMD] Dispositivo {device_id} não encontrado.")
-            return
-
-        device = devices[device_id]
-        if device["type"] != "gerador":
-            print(f"[CMD] Dispositivo {device_id} não é gerador.")
-            return
-
-        c = ModbusTCPClient(device["ip"], device["port"])
-        c.connect()
-        select_mode(c, command)
-        c.close()
-        print(f"[CMD] Comando '{command}' enviado para {device_id}.")
-    except Exception as e:
-        print("[CMD] Erro ao processar comando:", e)
-def select_mode(client, command):
-    commands = {
-        "stop": 35700,
-        "auto": 35701,
-        "manual": 35702,
-        "start": 35705,
-        "run": 35708
-    }
-    if command in commands:
-        value = commands[command]
-        client.write_registers(16 * 256 + 8, [value, 65535 - value])
+    # 4) Se conectou no STA, inicia WebSocket; senão dorme
+    if sta.isconnected():
+        await handle_websocket()
     else:
-        print(f"[CMD] Comando inválido: {command}")
+        while True:
+            await asyncio.sleep(10)
 
-config = load_config()
-start_ap()
-
-if connect_wifi(config):
-    print("[BOOT] Wi-Fi conectado. Iniciando sistema principal...")
-else:
-    print("[BOOT] Sem Wi-Fi. Modo AP ativo.")
-
-# Inicia o web server em paralelo
-_thread.start_new_thread(start_web_server, ())
-
-# Executa o loop principal
-main_loop()
+# roda tudo
+asyncio.run(main())

@@ -60,3 +60,37 @@ class ModbusTCPClient:
     def read_double_register(self, address):
         regs = self.read_holding_registers(address, 2)
         return struct.unpack('>I', struct.pack('>HH', *regs))[0]
+    
+    def write_single_register(self, address, value):
+        self.transaction_id = (self.transaction_id + 1) % 0x10000
+        mbap = struct.pack('>HHHB',
+                           self.transaction_id,
+                           0x0000,
+                           6,
+                           self.unit_id)
+        pdu = struct.pack('>BHH', 0x06, address, value)  # FC6
+        self.sock.send(mbap + pdu)
+        resp = self.sock.recv(12)
+        if len(resp) < 12:
+            raise Exception("Resposta incompleta ao escrever single")
+        # opcional: validar echo de address e value
+        return resp
+
+    def write_registers(self, address, values):
+        self.transaction_id = (self.transaction_id + 1) % 0x10000
+        qty = len(values)
+        byte_count = qty * 2
+        pdu = struct.pack('>BHHB', 0x10, address, qty, byte_count) \
+              + b''.join(struct.pack('>H', v) for v in values)
+        length = len(pdu) + 1
+        mbap = struct.pack('>HHHB',
+                           self.transaction_id,
+                           0x0000,
+                           length,
+                           self.unit_id)
+        self.sock.send(mbap + pdu)
+        resp = self.sock.recv(12)
+        if len(resp) < 12:
+            raise Exception("Resposta incompleta ao escrever múltiplos")
+        # opcional: validar echo de address e qty
+        return resp
