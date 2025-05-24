@@ -33,11 +33,10 @@ def save_config(cfg):
 def serve_file(client, path, content_type="text/html"):
     try:
         with open(path, "r") as f:
-            client.send("HTTP/1.0 200 OK\r\nContent-Type: {}\r\n\r\n".format(content_type))
+            client.send("HTTP/1.0 200 OK\r\nContent-type: {}\r\n\r\n".format(content_type))
             client.send(f.read())
     except:
         client.send("HTTP/1.0 404 Not Found\r\n\r\nFile not found.")
-
 def handle_wifi_save(client, req):
     try:
         body = req.split("\r\n\r\n", 1)[1]
@@ -68,8 +67,10 @@ def start_web_server():
     while True:
         cl, addr = s.accept()
         req = cl.recv(1024).decode()
-        if "GET /wifi"   in req: serve_file(cl, "web/wifi.html")
-        elif "GET / "    in req: serve_file(cl, "web/index.html")
+        if "GET /wifi" in req:
+            serve_file(cl, "web/wifi.html")
+        elif "GET / " in req:
+            serve_file(cl, "web/index.html")
         elif "GET /scripts.js" in req:
             serve_file(cl, "web/scripts.js", content_type="application/javascript")
         elif "GET /scan" in req:
@@ -77,22 +78,64 @@ def start_web_server():
                 sta = network.WLAN(network.STA_IF)
                 sta.active(True)
                 nets = sta.scan()
-                out = [{"ssid":n[0].decode(),"rssi":n[3]} for n in nets]
+                result = [{"ssid": n[0].decode(), "rssi": n[3]} for n in nets]
                 cl.send("HTTP/1.0 200 OK\r\nContent-Type: application/json\r\n\r\n")
-                cl.send(json.dumps(out))
+                cl.send(json.dumps(result))
             except Exception as e:
-                print("[WIFI] Erro scan:", e)
+                print("[WIFI] Erro ao escanear redes:", e)
                 cl.send("HTTP/1.0 500 Internal Server Error\r\n\r\n")
         elif "GET /status" in req:
             sta = network.WLAN(network.STA_IF)
             data = {
                 "connected": sta.isconnected(),
-                "ssid":      sta.config("essid") if sta.isconnected() else None,
-                "ip":        sta.ifconfig()[0] if sta.isconnected() else None,
-                "rssi":      sta.status("rssi") if sta.isconnected() else None,
+                "ssid": sta.config("essid") if sta.isconnected() else None,
+                "ip": sta.ifconfig()[0] if sta.isconnected() else None,
+                "rssi": sta.status("rssi") if sta.isconnected() else None,
             }
             cl.send("HTTP/1.0 200 OK\r\nContent-Type: application/json\r\n\r\n")
             cl.send(json.dumps(data))
+        elif "GET /dispositivos" in req:
+            serve_file(cl, "web/devices.html")
+
+        elif "GET /get-devices" in req:
+            cfg = load_config()
+            devices = cfg.get("devices", {})
+            cl.send("HTTP/1.0 200 OK\r\nContent-Type: application/json\r\n\r\n")
+            cl.send(json.dumps(devices))
+            
+        elif "GET /ota" in req:
+            try:
+                import ota_updater
+                cl.send("HTTP/1.0 200 OK\r\nContent-Type: text/plain\r\n\r\nAtualizando... Reiniciando em instantes.")
+                cl.close()
+                time.sleep(1)
+                ota_updater.update_all()
+                return
+            except Exception as e:
+                print("[WEB] Erro ao iniciar OTA:", e)
+                cl.send("HTTP/1.0 500 Internal Server Error\r\n\r\nErro ao iniciar atualização OTA.")
+
+        elif "POST /save-device" in req:
+            try:
+                body = req.split("\r\n\r\n", 1)[1]
+                data = json.loads(body)
+                cfg = load_config()
+                if "devices" not in cfg:
+                    cfg["devices"] = {}
+                cfg["devices"][data["id"]] = {
+                    "ip": data["ip"],
+                    "port": int(data["port"]),
+                    "type": data["type"]
+                }
+                save_config(cfg)
+                cl.send("HTTP/1.0 200 OK\r\n\r\nSalvo com sucesso.")
+            except Exception as e:
+                print("[WEB] Erro ao salvar dispositivo:", e)
+                cl.send("HTTP/1.0 500 Internal Server Error\r\n\r\nErro ao salvar dispositivo.")
+        elif "GET /styles.css" in req:
+            serve_file(cl, "web/styles.css", content_type="text/css")
+        elif "GET /scripts.js" in req:
+            serve_file(cl, "web/scripts.js", content_type="application/javascript")
         elif "POST /save-wifi" in req:
             handle_wifi_save(cl, req)
         cl.close()
@@ -148,7 +191,7 @@ async def handle_websocket():
     import json
     mac = get_mac()[1]
     ws = AsyncWebsocketClient()
-    await ws.handshake(f"ws://solverge.ojaum.lat/ws?mac={mac}")
+    await ws.handshake(f"ws://192.168.3.44:5000/ws?mac={mac}")
     print("[WS] Conectado ao servidor WebSocket")
 
     async def listener():
@@ -200,6 +243,7 @@ async def main():
     ap.active(True)
     print("=== Hotspot Configuration ===")
     print("AP SSID:   Solverge")
+    print("AP Password (MAC):", mac)
     print("=============================")
 
     # 2) Tenta conectar via STA se já tiver configurações
